@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>League 躲避训练 · 3D</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #0a0c12;
+      color: #e8e8ed;
+    }
+    .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+    .topbar {
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; padding: 0.65rem 1.25rem;
+      background: #141820;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      flex-wrap: wrap;
+    }
+    .topbar h1 { font-size: 0.95rem; font-weight: 600; }
+    .hud { display: flex; gap: 1.25rem; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .hud .label { opacity: 0.5; margin-right: 0.3rem; }
+    .hud strong { font-size: 1.05rem; color: #fff; }
+    .hud .hp strong { color: #ff6b6b; }
+    .hud .time strong { color: #6ec8ff; }
+    .hud .dodge strong { color: #7dff9a; }
+    .hp-bar-wrap { display: flex; align-items: center; gap: 0.5rem; min-width: 140px; }
+    .hp-bar { flex: 1; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; }
+    .hp-bar-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff4444, #ff8844); border-radius: 4px; transition: width 0.15s; }
+    .settings { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; opacity: 0.88; }
+    .settings.disabled { opacity: 0.35; pointer-events: none; }
+    .settings label { display: flex; align-items: center; gap: 0.2rem; cursor: pointer; padding: 0.2rem 0.45rem; border-radius: 6px; }
+    .settings label:has(input:checked) { background: rgba(110, 200, 255, 0.15); color: #6ec8ff; }
+    .arena-wrap { flex: 1; position: relative; min-height: 0; cursor: crosshair; }
+    .arena-wrap.idle { cursor: default; }
+    #canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+    .arena-wrap.idle #canvas { cursor: default; }
+    .overlay {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(8, 10, 16, 0.82); backdrop-filter: blur(4px);
+      text-align: center; padding: 2rem; z-index: 10;
+    }
+    .overlay.hidden { display: none; }
+    .overlay h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .overlay .desc { opacity: 0.65; font-size: 0.88rem; line-height: 1.65; max-width: 42ch; margin-bottom: 1.25rem; }
+    .overlay .final-stats { margin-bottom: 1.25rem; font-size: 1.1rem; }
+    .overlay .final-stats strong { color: #6ec8ff; font-size: 1.5rem; }
+    .btn {
+      font: inherit; font-size: 1rem; font-weight: 600; padding: 0.75rem 2rem;
+      border: none; border-radius: 10px;
+      background: linear-gradient(180deg, #c89b3c, #785a28); color: #fff; cursor: pointer;
+      box-shadow: 0 4px 20px rgba(200, 155, 60, 0.35);
+      transition: transform 0.1s, filter 0.15s;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.5; cursor: wait; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1>League 躲避 · 3D</h1>
+      <div class="hud">
+        <div class="hp-bar-wrap">
+          <span class="hp"><span class="label">生命</span><strong id="hpText">100</strong></span>
+          <div class="hp-bar"><div class="hp-bar-fill" id="hpFill"></div></div>
+        </div>
+        <span class="time"><span class="label">存活</span><strong id="timeAlive">0.0</strong>s</span>
+        <span class="dodge"><span class="label">躲避</span><strong id="dodgeCount">0</strong></span>
+      </div>
+      <div class="settings" id="settings">
+        <span>难度</span>
+        <label><input type="radio" name="diff" value="1">简单</label>
+        <label><input type="radio" name="diff" value="2" checked>普通</label>
+        <label><input type="radio" name="diff" value="3">困难</label>
+      </div>
+    </header>
+    <div class="arena-wrap idle" id="arenaWrap">
+      <canvas id="canvas"></canvas>
+      <div id="overlay" class="overlay">
+        <h2 id="overlayTitle">League 躲避训练</h2>
+        <p class="desc" id="overlayDesc">加载中…</p>
+        <p class="final-stats" id="finalStats" hidden>
+          存活 <strong id="finalTime">0</strong>s · 躲避 <strong id="finalDodge">0</strong> 个技能
+        </p>
+        <button type="button" class="btn" id="startBtn" disabled>加载资源…</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+
+    const canvas = document.getElementById('canvas');
+    const arenaWrap = document.getElementById('arenaWrap');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlayDesc = document.getElementById('overlayDesc');
+    const finalStats = document.getElementById('finalStats');
+    const finalTime = document.getElementById('finalTime');
+    const finalDodge = document.getElementById('finalDodge');
+    const startBtn = document.getElementById('startBtn');
+    const settings = document.getElementById('settings');
+    const hpText = document.getElementById('hpText');
+    const hpFill = document.getElementById('hpFill');
+    const timeAliveEl = document.getElementById('timeAlive');
+    const dodgeCountEl = document.getElementById('dodgeCount');
+
+    const DIFF = {
+      1: { spawn: 0.88, speed: 0.82, dmgMul: 0.75 },
+      2: { spawn: 0.62, speed: 1.0, dmgMul: 1.0 },
+      3: { spawn: 0.42, speed: 1.22, dmgMul: 1.2 },
+    };
+
+    const ARENA_W = 34;
+    const ARENA_D = 20;
+    const PLAYER_R = 0.85;
+    const PLAYER_MOVE_SPEED = 11;
+    const MAX_HP = 100;
+    const INVULN_MS = 900;
+    const CHAMPION_GLB = './models/Ezreal.glb';
+
+    const SKILLS = [
+      { id: 'luxQ', name: '光之束缚', mesh: 'luxQ', radius: 0.55, speed: 9, dmg: 12, weight: 4, trail: true },
+      { id: 'ezQ', name: '秘术射击', mesh: 'ezQ', radius: 0.5, speed: 10.5, dmg: 10, weight: 4 },
+      { id: 'ahriE', name: '魅惑红尘', mesh: 'ahriE', radius: 0.55, speed: 8, dmg: 16, weight: 3, trail: true },
+      { id: 'brandW', name: '烈焰之柱', mesh: 'brandW', radius: 0, speed: 0, dmg: 22, weight: 2, aoe: true },
+      { id: 'volley', name: '万箭齐发', mesh: 'volley', radius: 0.85, speed: 7.2, dmg: 18, weight: 2, wide: true },
+      { id: 'luxR', name: '终极闪光', mesh: 'luxR', radius: 0, speed: 0, dmg: 40, weight: 2, laser: true },
+    ];
+
+    let playing = false;
+    let player = { x: 0, z: 0, prevX: 0, prevZ: 0, destX: 0, destZ: 0, hasDest: false, vx: 0, vz: 0 };
+    let hp = MAX_HP;
+    let elapsed = 0;
+    let dodgeCount = 0;
+    let skillshots = [];
+    let clickEffects = [];
+    let spawnAcc = 0;
+    let invulnUntil = 0;
+    let hitFlash = 0;
+    let animId = null;
+    let lastTs = 0;
+    let assetsReady = false;
+    let championUsesGlb = false;
+
+    const mouse = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    let scene, camera, renderer, groundPlane, playerGroup, destMarker, clock;
+    let playerMixer = null;
+    let playerWalkAction = null;
+
+    function getDiff() {
+      const el = settings.querySelector('input[name="diff"]:checked');
+      return DIFF[el ? Number(el.value) : 2] || DIFF[2];
+    }
+
+    function emissiveMat(color, intensity = 0.55) {
+      return new THREE.MeshStandardMaterial({
+        color, emissive: color, emissiveIntensity: intensity,
+        metalness: 0.25, roughness: 0.45,
+      });
+    }
+
+    function buildProceduralEzreal() {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.55, 6, 10), emissiveMat(0x2a6eb8, 0.15));
+      body.position.y = 0.75;
+      const chest = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.32), emissiveMat(0xc89b3c, 0.2));
+      chest.position.y = 1.05;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 12), emissiveMat(0xf0dcc0, 0.08));
+      head.position.y = 1.45;
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), emissiveMat(0xd4a017, 0.15));
+      hair.position.y = 1.55;
+      const padL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.28), emissiveMat(0xc89b3c, 0.35));
+      padL.position.set(-0.38, 1.12, 0);
+      const padR = padL.clone();
+      padR.position.x = 0.38;
+      const gauntlet = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.35, 8), emissiveMat(0x4fd1ff, 0.85));
+      gauntlet.position.set(0.42, 0.95, 0.12);
+      gauntlet.rotation.z = -0.4;
+      const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.45, 4, 8), emissiveMat(0x1a3f6e, 0.1));
+      legL.position.set(-0.16, 0.35, 0);
+      const legR = legL.clone();
+      legR.position.x = 0.16;
+      g.add(body, chest, head, hair, padL, padR, gauntlet, legL, legR);
+      return g;
+    }
+
+    function createSkillMesh(type, opts = {}) {
+      const g = new THREE.Group();
+      g.userData.skillType = type;
+
+      if (type === 'luxQ') {
+        const core = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 14), emissiveMat(0xffe566, 0.9));
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.07, 8, 20), emissiveMat(0xffd700, 0.7));
+        ring.rotation.x = Math.PI / 2;
+        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.55, 4), emissiveMat(0xfffacd, 0.6));
+        shard.rotation.z = Math.PI / 2;
+        shard.position.x = 0.35;
+        g.add(core, ring, shard);
+      } else if (type === 'ezQ') {
+        const bolt = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), emissiveMat(0x4fd1ff, 1));
+        const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 6), emissiveMat(0x1a8ccc, 0.8));
+        tail.rotation.z = Math.PI / 2;
+        tail.position.x = -0.35;
+        g.add(bolt, tail);
+      } else if (type === 'ahriE') {
+        const heart = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 12), emissiveMat(0xff7eb9, 0.95));
+        heart.scale.set(1.1, 0.95, 0.85);
+        const tail = new THREE.Mesh(new THREE.TorusKnotGeometry(0.12, 0.04, 48, 8), emissiveMat(0xc9184a, 0.7));
+        tail.position.z = -0.2;
+        g.add(heart, tail);
+      } else if (type === 'volley') {
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6), emissiveMat(0x7dff9a, 0.4));
+        shaft.rotation.z = Math.PI / 2;
+        const head = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 4), emissiveMat(0xb7f5c7, 0.6));
+        head.rotation.z = -Math.PI / 2;
+        head.position.x = 0.65;
+        g.add(shaft, head);
+      } else if (type === 'brandW') {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.5, 2.2, 32),
+          new THREE.MeshBasicMaterial({ color: 0xff6622, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.02;
+        const pillar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.15, 0.45, 4, 12, 1, true),
+          emissiveMat(0xff4400, 0.85)
+        );
+        pillar.position.y = 2;
+        pillar.visible = false;
+        pillar.name = 'pillar';
+        g.add(ring, pillar);
+      } else if (type === 'luxR') {
+        const length = opts.length || 50;
+        const width = opts.width || 1.05;
+        const warn = new THREE.Mesh(
+          new THREE.PlaneGeometry(length, width * 0.92),
+          new THREE.MeshBasicMaterial({ color: 0xff8833, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+        );
+        warn.rotation.x = -Math.PI / 2;
+        warn.position.y = 0.07;
+        warn.name = 'warn';
+        const beam = new THREE.Mesh(
+          new THREE.BoxGeometry(length, 0.28, width),
+          emissiveMat(0xffee88, 1.2)
+        );
+        beam.position.y = 0.22;
+        beam.name = 'beam';
+        beam.visible = false;
+        const core = new THREE.Mesh(
+          new THREE.BoxGeometry(length, 0.1, width * 0.38),
+          emissiveMat(0xffffff, 1.5)
+        );
+        core.position.y = 0.24;
+        core.name = 'core';
+        core.visible = false;
+        g.add(warn, beam, core);
+      }
+
+      return g;
+    }
+
+    function createClickEffectMesh() {
+      const g = new THREE.Group();
+      for (let i = 0; i < 3; i++) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.15, 0.22, 32),
+          new THREE.MeshBasicMaterial({ color: 0x46d26e, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.03 + i * 0.001;
+        ring.userData.ringIndex = i;
+        g.add(ring);
+      }
+      const center = new THREE.Mesh(
+        new THREE.CircleGeometry(0.12, 16),
+        new THREE.MeshBasicMaterial({ color: 0x78ffa0, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+      );
+      center.rotation.x = -Math.PI / 2;
+      center.position.y = 0.04;
+      g.add(center);
+      return g;
+    }
+
+    function initThree() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0d1520);
+      scene.fog = new THREE.Fog(0x0d1520, 28, 55);
+
+      camera = new THREE.PerspectiveCamera(48, 1, 0.1, 120);
+      camera.position.set(0, 24, 16);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+
+      scene.add(new THREE.AmbientLight(0x8899bb, 0.65));
+      const sun = new THREE.DirectionalLight(0xfff0dd, 1.1);
+      sun.position.set(8, 22, 10);
+      sun.castShadow = true;
+      scene.add(sun);
+      const rim = new THREE.DirectionalLight(0x6ec8ff, 0.35);
+      rim.position.set(-10, 8, -6);
+      scene.add(rim);
+
+      const groundGeo = new THREE.PlaneGeometry(ARENA_W + 4, ARENA_D + 4);
+      const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a3d2a, roughness: 0.92, metalness: 0.05 });
+      groundPlane = new THREE.Mesh(groundGeo, groundMat);
+      groundPlane.rotation.x = -Math.PI / 2;
+      groundPlane.receiveShadow = true;
+      scene.add(groundPlane);
+
+      const grid = new THREE.GridHelper(ARENA_W, 14, 0xc89b3c, 0x2a4a38);
+      grid.material.opacity = 0.28;
+      grid.material.transparent = true;
+      grid.position.y = 0.01;
+      scene.add(grid);
+
+      const border = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.PlaneGeometry(ARENA_W, ARENA_D)),
+        new THREE.LineBasicMaterial({ color: 0xc89b3c, transparent: true, opacity: 0.45 })
+      );
+      border.rotation.x = -Math.PI / 2;
+      border.position.y = 0.02;
+      scene.add(border);
+
+      playerGroup = new THREE.Group();
+      scene.add(playerGroup);
+
+      destMarker = new THREE.Group();
+      const dmRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.2, 0.28, 24),
+        new THREE.MeshBasicMaterial({ color: 0x46d26e, transparent: true, opacity: 0.7, side: THREE.DoubleSide })
+      );
+      dmRing.rotation.x = -Math.PI / 2;
+      dmRing.position.y = 0.03;
+      destMarker.add(dmRing);
+      destMarker.visible = false;
+      scene.add(destMarker);
+
+      clock = new THREE.Clock();
+    }
+
+    async function loadChampionModel() {
+      playerGroup.clear();
+      const loader = new GLTFLoader();
+      try {
+        const gltf = await loader.loadAsync(CHAMPION_GLB);
+        const model = gltf.scene;
+        model.traverse((o) => {
+          if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+        });
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const scale = 1.8 / Math.max(size.x, size.y, size.z);
+        model.scale.setScalar(scale);
+        box.setFromObject(model);
+        model.position.y = -box.min.y;
+        model.rotation.y = Math.PI;
+        playerGroup.add(model);
+        if (gltf.animations.length) {
+          playerMixer = new THREE.AnimationMixer(model);
+          const run = gltf.animations.find((a) => /run|walk|move/i.test(a.name)) || gltf.animations[0];
+          playerWalkAction = playerMixer.clipAction(run);
+          playerWalkAction.loop = THREE.LoopRepeat;
+          playerWalkAction.play();
+          playerWalkAction.paused = true;
+        }
+        championUsesGlb = true;
+        return;
+      } catch (_) { /* fallback below */ }
+
+      championUsesGlb = false;
+      playerMixer = null;
+      const proc = buildProceduralEzreal();
+      proc.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      playerGroup.add(proc);
+    }
+
+    function resize() {
+      const rect = arenaWrap.getBoundingClientRect();
+      if (!renderer) return;
+      renderer.setSize(rect.width, rect.height, false);
+      camera.aspect = rect.width / rect.height;
+      camera.updateProjectionMatrix();
+    }
+
+    function pickSkill() {
+      const pool = elapsed < 6 ? SKILLS.filter((s) => !s.laser) : SKILLS;
+      const total = pool.reduce((s, k) => s + k.weight, 0);
+      let r = Math.random() * total;
+      for (const sk of pool) {
+        r -= sk.weight;
+        if (r <= 0) return sk;
+      }
+      return pool[0];
+    }
+
+    function clampPlayerPos(x, z) {
+      const hw = ARENA_W / 2 - PLAYER_R;
+      const hd = ARENA_D / 2 - PLAYER_R;
+      return {
+        x: Math.max(-hw, Math.min(hw, x)),
+        z: Math.max(-hd, Math.min(hd, z)),
+      };
+    }
+
+    function getAimTarget(leadSec) {
+      let tx = player.x;
+      let tz = player.z;
+      if (player.hasDest) {
+        tx = player.x * 0.5 + player.destX * 0.5;
+        tz = player.z * 0.5 + player.destZ * 0.5;
+      }
+      tx += player.vx * leadSec;
+      tz += player.vz * leadSec;
+      const spread = Math.max(0.2, 1.1 - elapsed * 0.04);
+      tx += (Math.random() - 0.5) * spread;
+      tz += (Math.random() - 0.5) * spread * 0.75;
+      return clampPlayerPos(tx, tz);
+    }
+
+    function pickSpawnOnEdge(aim) {
+      const margin = 1.5;
+      const hw = ARENA_W / 2;
+      const hd = ARENA_D / 2;
+      const dists = [
+        { side: 0, d: aim.z + hd + margin },
+        { side: 1, d: hw + margin - aim.x },
+        { side: 2, d: hd + margin - aim.z },
+        { side: 3, d: aim.x + hw + margin },
+      ];
+      dists.sort((a, b) => b.d - a.d);
+      const pick = Math.random() < 0.7 ? dists[0].side : Math.floor(Math.random() * 4);
+      let x, z;
+      if (pick === 0) { x = aim.x + (Math.random() - 0.5) * ARENA_W * 0.35; z = -hd - margin; }
+      else if (pick === 1) { x = hw + margin; z = aim.z + (Math.random() - 0.5) * ARENA_D * 0.35; }
+      else if (pick === 2) { x = aim.x + (Math.random() - 0.5) * ARENA_W * 0.35; z = hd + margin; }
+      else { x = -hw - margin; z = aim.z + (Math.random() - 0.5) * ARENA_D * 0.35; }
+      return { x, z };
+    }
+
+    function attachSkillMesh(s, skill) {
+      const meshOpts = s.type === 'laser'
+        ? { length: Math.hypot(s.x2 - s.x1, s.z2 - s.z1), width: s.width }
+        : {};
+      s.meshObj = createSkillMesh(skill.mesh, meshOpts);
+      scene.add(s.meshObj);
+      syncSkillMesh(s);
+    }
+
+    function syncSkillMesh(s) {
+      if (!s.meshObj) return;
+      const m = s.meshObj;
+
+      if (s.type === 'laser') {
+        const cx = (s.x1 + s.x2) * 0.5;
+        const cz = (s.z1 + s.z2) * 0.5;
+        m.position.set(cx, 0, cz);
+        m.rotation.y = Math.atan2(s.ux, s.uz);
+        const warn = m.getObjectByName('warn');
+        const beam = m.getObjectByName('beam');
+        const core = m.getObjectByName('core');
+        if (warn) warn.visible = s.phase === 'charge';
+        if (beam) beam.visible = s.phase === 'beam';
+        if (core) core.visible = s.phase === 'beam';
+        if (s.phase === 'charge' && warn) {
+          warn.material.opacity = 0.2 + Math.sin(s.timer * 18) * 0.12 + (s.timer / s.chargeTime) * 0.25;
+        }
+        return;
+      }
+
+      if (s.type === 'aoe') {
+        m.position.set(s.x, 0, s.z);
+        const pillar = m.getObjectByName('pillar');
+        if (pillar) {
+          pillar.visible = s.phase === 'boom';
+          pillar.material.emissiveIntensity = 0.85 + Math.sin(elapsed * 12) * 0.2;
+        }
+        const ring = m.children[0];
+        if (ring && s.phase === 'warn') {
+          ring.scale.setScalar(s.radius / 2);
+          ring.material.opacity = 0.25 + Math.sin(s.timer * 12) * 0.12;
+        }
+        return;
+      }
+
+      m.position.set(s.x, s.type === 'wide' ? 0.45 : 0.55, s.z);
+      if (s.vx != null) m.rotation.y = Math.atan2(s.vx, s.vz);
+    }
+
+    function spawnClickEffect(x, z) {
+      const mesh = createClickEffectMesh();
+      mesh.position.set(x, 0, z);
+      scene.add(mesh);
+      clickEffects.push({ x, z, age: 0, maxAge: 0.65, mesh });
+    }
+
+    function spawnMissile(skill, diff) {
+      const aim = getAimTarget(0.28 + Math.random() * 0.22);
+      const spawn = pickSpawnOnEdge(aim);
+      const dx = aim.x - spawn.x;
+      const dz = aim.z - spawn.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const spd = skill.speed * diff.speed * (0.85 + Math.random() * 0.3);
+      const s = {
+        type: skill.wide ? 'wide' : 'missile',
+        x: spawn.x, z: spawn.z,
+        prevX: spawn.x, prevZ: spawn.z,
+        vx: (dx / len) * spd, vz: (dz / len) * spd,
+        radius: skill.wide ? skill.radius * 1.3 : skill.radius,
+        dmg: Math.round(skill.dmg * diff.dmgMul),
+        trail: skill.trail,
+        life: 8, hit: false, meshKey: skill.mesh,
+      };
+      skillshots.push(s);
+      attachSkillMesh(s, skill);
+    }
+
+    function spawnLaser(skill, diff) {
+      const aim = getAimTarget(0.4);
+      const spawn = pickSpawnOnEdge(aim);
+      const dx = aim.x - spawn.x;
+      const dz = aim.z - spawn.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len;
+      const uz = dz / len;
+      const extend = Math.max(ARENA_W, ARENA_D) * 1.8;
+      const s = {
+        type: 'laser',
+        ox: spawn.x, oz: spawn.z,
+        ux, uz,
+        x1: spawn.x - ux * extend, z1: spawn.z - uz * extend,
+        x2: spawn.x + ux * extend, z2: spawn.z + uz * extend,
+        width: 1.05,
+        dmg: Math.round(skill.dmg * diff.dmgMul),
+        phase: 'charge', timer: 0,
+        chargeTime: 0.9 + Math.random() * 0.25,
+        beamTime: 0.42, hit: false, meshKey: skill.mesh,
+      };
+      skillshots.push(s);
+      attachSkillMesh(s, skill);
+    }
+
+    function spawnAoe(skill, diff) {
+      const aim = getAimTarget(0.15);
+      const s = {
+        type: 'aoe',
+        x: aim.x + (Math.random() - 0.5) * 1.2,
+        z: aim.z + (Math.random() - 0.5) * 1,
+        radius: 1.6 + Math.random() * 1.2,
+        dmg: Math.round(skill.dmg * diff.dmgMul),
+        phase: 'warn', timer: 0,
+        warnTime: 0.85 - Math.min(0.35, elapsed * 0.008),
+        boomTime: 0.35, hit: false, meshKey: skill.mesh,
+      };
+      skillshots.push(s);
+      attachSkillMesh(s, skill);
+    }
+
+    function spawnSkillshot() {
+      const skill = pickSkill();
+      const diff = getDiff();
+      if (skill.laser) spawnLaser(skill, diff);
+      else if (skill.aoe) spawnAoe(skill, diff);
+      else spawnMissile(skill, diff);
+    }
+
+    function distPointToSegment(px, pz, x1, z1, x2, z2) {
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const len2 = dx * dx + dz * dz;
+      if (len2 === 0) return Math.hypot(px - x1, pz - z1);
+      let t = ((px - x1) * dx + (pz - z1) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
+    }
+
+    function circlesOverlap(x1, z1, r1, x2, z2, r2) {
+      return Math.hypot(x1 - x2, z1 - z2) < r1 + r2;
+    }
+
+    function sweptCirclesHit(ax1, az1, ax2, az2, ar, bx1, bz1, bx2, bz2, br) {
+      const steps = Math.max(4, Math.ceil(
+        Math.max(Math.hypot(ax2 - ax1, az2 - az1), Math.hypot(bx2 - bx1, bz2 - bz1)) / (ar + br) * 2
+      ));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        if (circlesOverlap(
+          ax1 + (ax2 - ax1) * t, az1 + (az2 - az1) * t, ar,
+          bx1 + (bx2 - bx1) * t, bz1 + (bz2 - bz1) * t, br
+        )) return true;
+      }
+      return false;
+    }
+
+    function getSkillHitRadius(s) {
+      if (s.type === 'wide') return s.radius * 0.95;
+      return s.radius;
+    }
+
+    function checkHit(s) {
+      if (s.hit) return false;
+      if (performance.now() < invulnUntil) return false;
+      const pr = PLAYER_R * 0.88;
+      const sr = getSkillHitRadius(s);
+
+      if (s.type === 'aoe') {
+        if (s.phase !== 'boom') return false;
+        return circlesOverlap(player.x, player.z, pr, s.x, s.z, s.radius * 0.92);
+      }
+      if (s.type === 'laser') {
+        if (s.phase !== 'beam') return false;
+        const d = distPointToSegment(player.x, player.z, s.x1, s.z1, s.x2, s.z2);
+        const dPrev = distPointToSegment(player.prevX, player.prevZ, s.x1, s.z1, s.x2, s.z2);
+        return d < s.width * 0.52 + pr || dPrev < s.width * 0.52 + pr;
+      }
+      return sweptCirclesHit(
+        s.prevX, s.prevZ, s.x, s.z, sr,
+        player.prevX, player.prevZ, player.x, player.z, pr
+      );
+    }
+
+    function removeSkillshot(s, i) {
+      if (s.meshObj) {
+        scene.remove(s.meshObj);
+        s.meshObj.traverse((o) => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) {
+            if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+            else o.material.dispose();
+          }
+        });
+      }
+      skillshots.splice(i, 1);
+    }
+
+    function updatePlayer(dt) {
+      player.prevX = player.x;
+      player.prevZ = player.z;
+
+      if (!player.hasDest) {
+        player.vx = 0;
+        player.vz = 0;
+        if (playerWalkAction) playerWalkAction.paused = true;
+        return;
+      }
+
+      const dx = player.destX - player.x;
+      const dz = player.destZ - player.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist < 0.08) {
+        player.x = player.destX;
+        player.z = player.destZ;
+        player.hasDest = false;
+        player.vx = 0;
+        player.vz = 0;
+        if (playerWalkAction) playerWalkAction.paused = true;
+        return;
+      }
+
+      const step = PLAYER_MOVE_SPEED * dt;
+      const ratio = Math.min(1, step / dist);
+      player.x += dx * ratio;
+      player.z += dz * ratio;
+      const clamped = clampPlayerPos(player.x, player.z);
+      player.x = clamped.x;
+      player.z = clamped.z;
+      player.vx = (player.x - player.prevX) / Math.max(dt, 0.001);
+      player.vz = (player.z - player.prevZ) / Math.max(dt, 0.001);
+
+      if (playerWalkAction) {
+        playerWalkAction.paused = false;
+        playerWalkAction.timeScale = 1.2;
+      }
+      playerGroup.rotation.y = Math.atan2(dx, dz);
+    }
+
+    function applyHit(dmg) {
+      hp = Math.max(0, hp - dmg);
+      invulnUntil = performance.now() + INVULN_MS;
+      hitFlash = 0.35;
+      hpText.textContent = String(Math.ceil(hp));
+      hpFill.style.width = (hp / MAX_HP * 100) + '%';
+      if (hp <= 0) endGame();
+    }
+
+    function updateClickEffects(dt) {
+      for (let i = clickEffects.length - 1; i >= 0; i--) {
+        const ce = clickEffects[i];
+        ce.age += dt;
+        const t = ce.age / ce.maxAge;
+        ce.mesh.children.forEach((ring) => {
+          if (ring.userData.ringIndex != null) {
+            const rt = (t + ring.userData.ringIndex * 0.28) % 1;
+            const sc = 1 + rt * 2.8;
+            ring.scale.set(sc, sc, 1);
+            ring.material.opacity = (1 - rt) * 0.8;
+          } else {
+            ring.material.opacity = (1 - t) * 0.85;
+          }
+        });
+        if (ce.age >= ce.maxAge) {
+          scene.remove(ce.mesh);
+          ce.mesh.traverse((o) => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+          });
+          clickEffects.splice(i, 1);
+        }
+      }
+    }
+
+    function update(dt) {
+      const diff = getDiff();
+      elapsed += dt;
+      timeAliveEl.textContent = elapsed.toFixed(1);
+      updatePlayer(dt);
+      if (playerMixer) playerMixer.update(dt);
+
+      const spawnRate = diff.spawn / (1 + elapsed * 0.055);
+      spawnAcc += dt;
+      while (spawnAcc >= spawnRate) {
+        spawnAcc -= spawnRate;
+        spawnSkillshot();
+        const extra = 0.22 + Math.min(0.35, elapsed * 0.012);
+        if (Math.random() < extra) spawnSkillshot();
+        if (elapsed > 6 && Math.random() < 0.18) spawnSkillshot();
+      }
+
+      updateClickEffects(dt);
+
+      for (let i = skillshots.length - 1; i >= 0; i--) {
+        const s = skillshots[i];
+
+        if (s.type === 'laser') {
+          s.timer += dt;
+          if (s.phase === 'charge' && s.timer >= s.chargeTime) {
+            s.phase = 'beam';
+            s.timer = 0;
+          } else if (s.phase === 'beam') {
+            if (checkHit(s)) { s.hit = true; applyHit(s.dmg); }
+            if (s.timer >= s.beamTime) {
+              if (!s.hit) dodgeCount++;
+              removeSkillshot(s, i);
+              continue;
+            }
+          }
+          syncSkillMesh(s);
+          continue;
+        }
+
+        if (s.type === 'aoe') {
+          s.timer += dt;
+          if (s.phase === 'warn' && s.timer >= s.warnTime) {
+            s.phase = 'boom';
+            s.timer = 0;
+          } else if (s.phase === 'boom') {
+            if (checkHit(s)) { s.hit = true; applyHit(s.dmg); }
+            if (s.timer >= s.boomTime) {
+              if (!s.hit) dodgeCount++;
+              removeSkillshot(s, i);
+              continue;
+            }
+          }
+          syncSkillMesh(s);
+        } else {
+          s.prevX = s.x;
+          s.prevZ = s.z;
+          s.x += s.vx * dt;
+          s.z += s.vz * dt;
+          s.life -= dt;
+          if (checkHit(s)) {
+            s.hit = true;
+            applyHit(s.dmg);
+            removeSkillshot(s, i);
+            continue;
+          }
+        const hw = ARENA_W / 2 + 2;
+        const hd = ARENA_D / 2 + 2;
+        if (s.life <= 0 || Math.abs(s.x) > hw || Math.abs(s.z) > hd) {
+            if (!s.hit) dodgeCount++;
+            removeSkillshot(s, i);
+            continue;
+          }
+          syncSkillMesh(s);
+        }
+      }
+
+      dodgeCountEl.textContent = String(dodgeCount);
+      if (hitFlash > 0) hitFlash -= dt;
+
+      playerGroup.position.set(player.x, 0, player.z);
+      if (hitFlash > 0) playerGroup.scale.setScalar(1 + Math.sin(hitFlash * 30) * 0.04);
+      else playerGroup.scale.setScalar(1);
+
+      if (player.hasDest) {
+        destMarker.visible = true;
+        destMarker.position.set(player.destX, 0, player.destZ);
+        destMarker.rotation.y = elapsed * 2;
+      } else {
+        destMarker.visible = false;
+      }
+    }
+
+    function render() {
+      renderer.render(scene, camera);
+    }
+
+    function loop(ts) {
+      if (!playing) return;
+      if (!lastTs) lastTs = ts;
+      const dt = Math.min((ts - lastTs) / 1000, 0.05);
+      lastTs = ts;
+      update(dt);
+      render();
+      animId = requestAnimationFrame(loop);
+    }
+
+    function idleRender() {
+      render();
+    }
+
+    function clearSkillshots() {
+      for (let i = skillshots.length - 1; i >= 0; i--) removeSkillshot(skillshots[i], i);
+    }
+
+    function startGame() {
+      playing = true;
+      hp = MAX_HP;
+      elapsed = 0;
+      dodgeCount = 0;
+      spawnAcc = 0;
+      invulnUntil = 0;
+      hitFlash = 0;
+      lastTs = 0;
+      clearSkillshots();
+      clickEffects.forEach((ce) => scene.remove(ce.mesh));
+      clickEffects = [];
+
+      player.x = 0;
+      player.z = ARENA_D * 0.15;
+      player.prevX = player.x;
+      player.prevZ = player.z;
+      player.destX = player.x;
+      player.destZ = player.z;
+      player.hasDest = false;
+      player.vx = 0;
+      player.vz = 0;
+      playerGroup.position.set(player.x, 0, player.z);
+
+      hpText.textContent = String(MAX_HP);
+      hpFill.style.width = '100%';
+      timeAliveEl.textContent = '0.0';
+      dodgeCountEl.textContent = '0';
+
+      overlay.classList.add('hidden');
+      settings.classList.add('disabled');
+      arenaWrap.classList.remove('idle');
+      cancelAnimationFrame(animId);
+      animId = requestAnimationFrame(loop);
+    }
+
+    function endGame() {
+      playing = false;
+      cancelAnimationFrame(animId);
+      settings.classList.remove('disabled');
+      arenaWrap.classList.add('idle');
+      overlayTitle.textContent = '你被击中了！';
+      overlayDesc.textContent = '再次挑战，看能存活多久、躲避多少技能。';
+      finalStats.hidden = false;
+      finalTime.textContent = elapsed.toFixed(1);
+      finalDodge.textContent = String(dodgeCount);
+      startBtn.textContent = '再来一局';
+      overlay.classList.remove('hidden');
+      idleRender();
+    }
+
+    function showStart() {
+      overlayTitle.textContent = 'League 躲避训练 · 3D';
+      const modelHint = championUsesGlb
+        ? '已加载官方风格 3D 英雄模型。'
+        : '当前为内置 3D 模型；将 Khada 导出的 Ezreal.glb 放入 models/ 可替换为游戏内模型。';
+      overlayDesc.textContent =
+        `右键点击地面移动。3D 技能弹道与拉克丝终极闪光，${modelHint}生命归零则游戏结束。`;
+      finalStats.hidden = true;
+      startBtn.textContent = '开始游戏';
+      overlay.classList.remove('hidden');
+    }
+
+    function screenToGround(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObject(groundPlane);
+      if (!hits.length) return null;
+      return clampPlayerPos(hits[0].point.x, hits[0].point.z);
+    }
+
+    function onPointerDown(e) {
+      if (!playing || e.button !== 2) return;
+      e.preventDefault();
+      const pos = screenToGround(e.clientX, e.clientY);
+      if (!pos) return;
+      player.destX = pos.x;
+      player.destZ = pos.z;
+      player.hasDest = true;
+      spawnClickEffect(pos.x, pos.z);
+    }
+
+    startBtn.addEventListener('click', startGame);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('resize', () => { resize(); if (!playing) idleRender(); });
+
+    initThree();
+    resize();
+    loadChampionModel().then(() => {
+      assetsReady = true;
+      startBtn.disabled = false;
+      showStart();
+      idleRender();
+    });
+  </script>
+</body>
+</html>
