@@ -6,4 +6,6 @@
 
 3. 增加aimTrainer 练习瞄准
 
-4. 增加reactionTest 反应力测试
+4. 增加aimTrainer 3D 跟枪训练
+
+5. 增加reactionTest 反应力测试
