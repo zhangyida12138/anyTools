@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aim 靶场</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #0c0e14;
+      color: #e8e8ed;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+    }
+
+    .topbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.75rem 1.25rem;
+      background: #141820;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .topbar h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .hud {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hud .label {
+      opacity: 0.5;
+      margin-right: 0.35rem;
+    }
+
+    .hud strong {
+      font-size: 1.1rem;
+      color: #fff;
+    }
+
+    .hud .time strong {
+      color: #6ec8ff;
+    }
+
+    .hud .score strong {
+      color: #7dff9a;
+    }
+
+    .settings {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      opacity: 0.85;
+    }
+
+    .settings .duration-ctrl {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .settings .duration-ctrl input[type="range"] {
+      width: 72px;
+      accent-color: #6ec8ff;
+      cursor: pointer;
+    }
+
+    .settings .duration-val {
+      min-width: 2.5ch;
+      font-variant-numeric: tabular-nums;
+      color: #6ec8ff;
+      font-weight: 600;
+    }
+
+    .settings.disabled {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    .settings label {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    .settings label:has(input:checked) {
+      background: rgba(110, 200, 255, 0.15);
+      color: #6ec8ff;
+    }
+
+    .settings input {
+      accent-color: #6ec8ff;
+    }
+
+    .arena-wrap {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+    }
+
+    .arena {
+      position: absolute;
+      inset: 0;
+      cursor: crosshair;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(40, 60, 90, 0.2), transparent 55%),
+        #0c0e14;
+    }
+
+    .arena.playing {
+      cursor: crosshair;
+    }
+
+    .target {
+      position: absolute;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.9);
+      background: radial-gradient(circle at 35% 35%, #ff6b4a, #c41e3a 55%, #7a1020);
+      box-shadow:
+        0 0 0 2px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(196, 30, 58, 0.45);
+      transform: translate(-50%, -50%);
+      touch-action: manipulation;
+      transition: transform 0.08s ease, opacity 0.08s ease;
+    }
+
+    .target::after {
+      content: "";
+      position: absolute;
+      inset: 50%;
+      width: 20%;
+      height: 20%;
+      margin: -10% 0 0 -10%;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.85);
+    }
+
+    .target.hit {
+      transform: translate(-50%, -50%) scale(0.6);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8, 10, 16, 0.72);
+      backdrop-filter: blur(4px);
+      text-align: center;
+      padding: 2rem;
+      z-index: 10;
+    }
+
+    .overlay.hidden {
+      display: none;
+    }
+
+    .overlay h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .overlay .desc {
+      opacity: 0.65;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      max-width: 32ch;
+      margin-bottom: 1.5rem;
+    }
+
+    .overlay .final-score {
+      font-size: 3.5rem;
+      font-weight: 800;
+      color: #7dff9a;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 0.25rem;
+    }
+
+    .overlay .final-label {
+      opacity: 0.5;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+
+    .overlay .stats-panel {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem 1.25rem;
+      margin-bottom: 1.5rem;
+      text-align: center;
+      width: min(420px, 92vw);
+    }
+
+    .overlay .stats-panel[hidden] {
+      display: none;
+    }
+
+    .overlay .stat-item .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #7dff9a;
+    }
+
+    .overlay .stat-item .stat-value.accent {
+      color: #6ec8ff;
+    }
+
+    .overlay .stat-item .stat-name {
+      font-size: 0.75rem;
+      opacity: 0.5;
+      margin-top: 0.2rem;
+    }
+
+    .btn {
+      font: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 0.75rem 2rem;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #3d8bfd, #2563eb);
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(37, 99, 235, 0.35);
+      transition: transform 0.1s, filter 0.15s;
+    }
+
+    .btn:hover {
+      filter: brightness(1.08);
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app">
+    <header class="topbar">
+      <h1>Aim 靶场</h1>
+      <div class="hud">
+        <span class="time"><span class="label">剩余</span><strong id="timeLeft">30.0</strong>s</span>
+        <span class="score"><span class="label">命中</span><strong id="score">0</strong></span>
+      </div>
+      <div class="settings" id="settings">
+        <div class="duration-ctrl">
+          <span>时长</span>
+          <input type="range" id="duration" min="10" max="60" value="30" step="1">
+          <span class="duration-val" id="durationVal">30</span><span>s</span>
+        </div>
+        <span>同屏</span>
+        <label><input type="radio" name="count" value="1" checked>1</label>
+        <label><input type="radio" name="count" value="2">2</label>
+        <label><input type="radio" name="count" value="3">3</label>
+      </div>
+    </header>
+
+    <div class="arena-wrap">
+      <div id="arena" class="arena"></div>
+      <div id="overlay" class="overlay">
+        <h2 id="overlayTitle">30 秒精准射击</h2>
+        <p class="desc" id="overlayDesc">
+          在区域内点击随机出现的靶子。击中后立即刷新下一个。可设置同屏 1～3 个靶子且互不重叠。
+        </p>
+        <p class="final-score" id="finalScore" hidden></p>
+        <p class="final-label" id="finalLabel" hidden>命中数</p>
+        <div class="stats-panel" id="statsPanel" hidden>
+          <div class="stat-item">
+            <div class="stat-value accent" id="statAccuracy">—</div>
+            <div class="stat-name">命中率</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value accent" id="statAvgRt">—</div>
+            <div class="stat-name">平均间隔 (ms)</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="statClicks">—</div>
+            <div class="stat-name">总点击</div>
+          </div>
+        </div>
+        <button type="button" class="btn" id="startBtn">开始训练</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MIN_SIZE = 36;
+    const MAX_SIZE = 88;
+    const GAP = 12;
+    const MAX_PLACE_TRIES = 80;
+
+    const arena = document.getElementById('arena');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlayDesc = document.getElementById('overlayDesc');
+    const finalScore = document.getElementById('finalScore');
+    const finalLabel = document.getElementById('finalLabel');
+    const startBtn = document.getElementById('startBtn');
+    const settings = document.getElementById('settings');
+    const durationInput = document.getElementById('duration');
+    const durationVal = document.getElementById('durationVal');
+    const timeLeftEl = document.getElementById('timeLeft');
+    const scoreEl = document.getElementById('score');
+    const statsPanel = document.getElementById('statsPanel');
+    const statAccuracy = document.getElementById('statAccuracy');
+    const statAvgRt = document.getElementById('statAvgRt');
+    const statClicks = document.getElementById('statClicks');
+
+    let playing = false;
+    let score = 0;
+    let misses = 0;
+    let endAt = 0;
+    let durationMs = 30000;
+    let rafId = null;
+    let targets = [];
+    let targetId = 0;
+    let lastHitAt = 0;
+    let sessionDurationSec = 30;
+    const hitIntervals = [];
+
+    function getDurationSec() {
+      return Number(durationInput.value);
+    }
+
+    function getDurationMs() {
+      return getDurationSec() * 1000;
+    }
+
+    durationInput.addEventListener('input', () => {
+      durationVal.textContent = durationInput.value;
+      if (!playing) {
+        timeLeftEl.textContent = Number(durationInput.value).toFixed(1);
+      }
+      updateStartTitle();
+    });
+
+    function updateStartTitle() {
+      if (!overlay.classList.contains('hidden') && finalScore.hidden) {
+        overlayTitle.textContent = `${getDurationSec()} 秒精准射击`;
+      }
+    }
+
+    function getSimultaneousCount() {
+      const checked = settings.querySelector('input[name="count"]:checked');
+      return checked ? Number(checked.value) : 1;
+    }
+
+    function getArenaBounds() {
+      const rect = arena.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    }
+
+    function randomSize() {
+      return MIN_SIZE + Math.random() * (MAX_SIZE - MIN_SIZE);
+    }
+
+    function getTargetRect(x, y, size) {
+      const r = size / 2;
+      return {
+        left: x - r,
+        top: y - r,
+        right: x + r,
+        bottom: y + r,
+        size,
+      };
+    }
+
+    function rectsOverlap(a, b) {
+      return !(
+        a.right + GAP < b.left ||
+        a.left > b.right + GAP ||
+        a.bottom + GAP < b.top ||
+        a.top > b.bottom + GAP
+      );
+    }
+
+    function collidesWithAny(candidate, others) {
+      for (const t of others) {
+        if (rectsOverlap(candidate, t.rect)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function fitsInArena(rect, bounds) {
+      return (
+        rect.left >= GAP &&
+        rect.top >= GAP &&
+        rect.right <= bounds.width - GAP &&
+        rect.bottom <= bounds.height - GAP
+      );
+    }
+
+    function tryPlaceTarget(size, existing) {
+      const bounds = getArenaBounds();
+      const half = size / 2;
+
+      for (let i = 0; i < MAX_PLACE_TRIES; i++) {
+        const x = half + GAP + Math.random() * (bounds.width - size - GAP * 2);
+        const y = half + GAP + Math.random() * (bounds.height - size - GAP * 2);
+        const rect = getTargetRect(x, y, size);
+        if (fitsInArena(rect, bounds) && !collidesWithAny(rect, existing)) {
+          return { x, y, size, rect };
+        }
+      }
+      return null;
+    }
+
+    function createTargetEl(x, y, size) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'target';
+      el.style.width = size + 'px';
+      el.style.height = size + 'px';
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.setAttribute('aria-label', '靶子');
+      return el;
+    }
+
+    function spawnOne() {
+      if (!playing) return false;
+
+      const existing = targets.map((t) => ({ rect: t.rect }));
+      let size = randomSize();
+      let placed = tryPlaceTarget(size, existing);
+
+      if (!placed) {
+        for (let s = size - 8; s >= MIN_SIZE; s -= 8) {
+          placed = tryPlaceTarget(s, existing);
+          if (placed) break;
+        }
+      }
+
+      if (!placed) return false;
+
+      const id = ++targetId;
+      const el = createTargetEl(placed.x, placed.y, placed.size);
+
+      const entry = {
+        id,
+        el,
+        x: placed.x,
+        y: placed.y,
+        size: placed.size,
+        rect: placed.rect,
+      };
+
+      el.addEventListener('pointerdown', (e) => onHit(entry, e));
+      arena.appendChild(el);
+      targets.push(entry);
+      return true;
+    }
+
+    function fillTargets() {
+      const want = getSimultaneousCount();
+      let guard = 0;
+      while (playing && targets.length < want && guard < 30) {
+        if (!spawnOne()) guard++;
+        else guard = 0;
+      }
+    }
+
+    function onHit(entry, e) {
+      if (!playing) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      entry.el.classList.add('hit');
+      const removeId = entry.id;
+      setTimeout(() => {
+        entry.el.remove();
+      }, 80);
+
+      targets = targets.filter((t) => t.id !== removeId);
+
+      const now = performance.now();
+      if (lastHitAt > 0) {
+        hitIntervals.push(now - lastHitAt);
+      }
+      lastHitAt = now;
+
+      score++;
+      scoreEl.textContent = String(score);
+
+      if (playing) {
+        spawnOne();
+        const want = getSimultaneousCount();
+        while (playing && targets.length < want) {
+          if (!spawnOne()) break;
+        }
+      }
+    }
+
+    function clearTargets() {
+      targets.forEach((t) => t.el.remove());
+      targets = [];
+    }
+
+    function updateTimer() {
+      const left = Math.max(0, endAt - performance.now());
+      timeLeftEl.textContent = (left / 1000).toFixed(1);
+      if (left <= 0) {
+        endGame();
+        return;
+      }
+      rafId = requestAnimationFrame(updateTimer);
+    }
+
+    function onArenaMiss(e) {
+      if (!playing || e.target !== arena) return;
+      misses++;
+    }
+
+    function calcAccuracy() {
+      const total = score + misses;
+      if (total === 0) return null;
+      return (score / total) * 100;
+    }
+
+    function calcAvgInterval() {
+      if (hitIntervals.length === 0) return null;
+      const sum = hitIntervals.reduce((a, b) => a + b, 0);
+      return sum / hitIntervals.length;
+    }
+
+    function formatPct(n) {
+      return n === null ? '—' : n.toFixed(1) + '%';
+    }
+
+    function formatMs(n) {
+      return n === null ? '—' : Math.round(n) + '';
+    }
+
+    function startGame() {
+      playing = true;
+      score = 0;
+      misses = 0;
+      lastHitAt = 0;
+      hitIntervals.length = 0;
+      scoreEl.textContent = '0';
+      sessionDurationSec = getDurationSec();
+      durationMs = sessionDurationSec * 1000;
+      endAt = performance.now() + durationMs;
+      timeLeftEl.textContent = getDurationSec().toFixed(1);
+
+      overlay.classList.add('hidden');
+      settings.classList.add('disabled');
+      arena.classList.add('playing');
+
+      clearTargets();
+      fillTargets();
+
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateTimer);
+    }
+
+    function endGame() {
+      playing = false;
+      cancelAnimationFrame(rafId);
+      clearTargets();
+      arena.classList.remove('playing');
+      settings.classList.remove('disabled');
+
+      const sec = sessionDurationSec;
+      const accuracy = calcAccuracy();
+      const avgRt = calcAvgInterval();
+      const totalClicks = score + misses;
+
+      overlayTitle.textContent = '训练结束';
+      overlayDesc.textContent = `${sec} 秒内命中 ${score} 个靶子${misses > 0 ? `，脱靶 ${misses} 次` : ''}。`;
+      finalScore.hidden = false;
+      finalLabel.hidden = false;
+      statsPanel.hidden = false;
+      finalScore.textContent = String(score);
+      statAccuracy.textContent = formatPct(accuracy);
+      statAvgRt.textContent = formatMs(avgRt);
+      statClicks.textContent = String(totalClicks);
+      startBtn.textContent = '再来一局';
+      overlay.classList.remove('hidden');
+    }
+
+    function showStartScreen() {
+      updateStartTitle();
+      overlayDesc.textContent =
+        '点击靶子得分，脱靶计入命中率。统计相邻两次命中的平均间隔反应时间。时长 10～60 秒可调。';
+      finalScore.hidden = true;
+      finalLabel.hidden = true;
+      statsPanel.hidden = true;
+      startBtn.textContent = '开始训练';
+      timeLeftEl.textContent = getDurationSec().toFixed(1);
+      overlay.classList.remove('hidden');
+    }
+
+    arena.addEventListener('pointerdown', onArenaMiss);
+    startBtn.addEventListener('click', startGame);
+    showStartScreen();
+
+    window.addEventListener('resize', () => {
+      if (!playing) return;
+      clearTargets();
+      fillTargets();
+    });
+  </script>
+</body>
+</html>
