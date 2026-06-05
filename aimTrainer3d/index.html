@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aim 靶场 3D · 跟随训练</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #0c0e14;
+      color: #e8e8ed;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+    }
+
+    .topbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.65rem 1rem;
+      background: #141820;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      flex-wrap: wrap;
+    }
+
+    .topbar h1 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .hud {
+      display: flex;
+      gap: 1.25rem;
+      font-size: 0.85rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hud .label {
+      opacity: 0.5;
+      margin-right: 0.3rem;
+    }
+
+    .hud strong {
+      font-size: 1.05rem;
+      color: #fff;
+    }
+
+    .hud .time strong { color: #6ec8ff; }
+    .hud .track strong { color: #7dff9a; }
+    .hud .streak strong { color: #ffb347; }
+
+    .hud .on-target {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .hud .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #555;
+      transition: background 0.12s, box-shadow 0.12s;
+    }
+
+    .hud .dot.active {
+      background: #7dff9a;
+      box-shadow: 0 0 8px #7dff9a;
+    }
+
+    .settings {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.65rem;
+      font-size: 0.75rem;
+      opacity: 0.88;
+    }
+
+    .settings.disabled {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    .settings .ctrl {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .settings input[type="range"] {
+      width: 64px;
+      accent-color: #6ec8ff;
+      cursor: pointer;
+    }
+
+    .settings .val {
+      min-width: 2ch;
+      font-variant-numeric: tabular-nums;
+      color: #6ec8ff;
+      font-weight: 600;
+    }
+
+    .settings label.opt {
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+      cursor: pointer;
+      padding: 0.2rem 0.45rem;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    .settings label.opt:has(input:checked) {
+      background: rgba(110, 200, 255, 0.15);
+      color: #6ec8ff;
+    }
+
+    .settings input[type="radio"],
+    .settings input[type="checkbox"] {
+      accent-color: #6ec8ff;
+    }
+
+    .arena-wrap {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+      cursor: none;
+    }
+
+    .arena-wrap.idle {
+      cursor: default;
+    }
+
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .crosshair {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 28px;
+      height: 28px;
+      margin: 0;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 5;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .crosshair.visible {
+      opacity: 1;
+    }
+
+    .crosshair::before,
+    .crosshair::after {
+      content: "";
+      position: absolute;
+      background: rgba(255, 255, 255, 0.85);
+      border-radius: 1px;
+    }
+
+    .crosshair::before {
+      left: 50%;
+      top: 2px;
+      bottom: 2px;
+      width: 2px;
+      margin-left: -1px;
+    }
+
+    .crosshair::after {
+      top: 50%;
+      left: 2px;
+      right: 2px;
+      height: 2px;
+      margin-top: -1px;
+    }
+
+    .crosshair .ring {
+      position: absolute;
+      inset: 0;
+      border: 2px solid rgba(255, 255, 255, 0.5);
+      border-radius: 50%;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+
+    .crosshair.on-target .ring {
+      border-color: #7dff9a;
+      box-shadow: 0 0 10px rgba(125, 255, 154, 0.5);
+    }
+
+    .crosshair.on-target::before,
+    .crosshair.on-target::after {
+      background: #7dff9a;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8, 10, 16, 0.78);
+      backdrop-filter: blur(4px);
+      text-align: center;
+      padding: 2rem;
+      z-index: 10;
+      cursor: default;
+    }
+
+    .overlay.hidden { display: none; }
+
+    .overlay h2 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .overlay .desc {
+      opacity: 0.65;
+      font-size: 0.88rem;
+      line-height: 1.65;
+      max-width: 36ch;
+      margin-bottom: 1.25rem;
+    }
+
+    .overlay .stats-panel {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem 1rem;
+      margin-bottom: 1.25rem;
+      width: min(440px, 92vw);
+    }
+
+    .overlay .stats-panel[hidden] { display: none; }
+
+    .overlay .stat-item .stat-value {
+      font-size: 1.45rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #7dff9a;
+    }
+
+    .overlay .stat-item .stat-value.accent { color: #6ec8ff; }
+    .overlay .stat-item .stat-value.warn { color: #ffb347; }
+
+    .overlay .stat-item .stat-name {
+      font-size: 0.72rem;
+      opacity: 0.5;
+      margin-top: 0.15rem;
+    }
+
+    .btn {
+      font: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 0.75rem 2rem;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #3d8bfd, #2563eb);
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(37, 99, 235, 0.35);
+      transition: transform 0.1s, filter 0.15s;
+    }
+
+    .btn:hover { filter: brightness(1.08); }
+    .btn:active { transform: scale(0.97); }
+
+  </style>
+</head>
+<body>
+
+  <div class="app">
+    <header class="topbar">
+      <h1>Aim 3D 跟随</h1>
+      <div class="hud">
+        <span class="time"><span class="label">剩余</span><strong id="timeLeft">30.0</strong>s</span>
+        <span class="track"><span class="label">跟随率</span><strong id="trackRate">0.0</strong>%</span>
+        <span class="streak"><span class="label">最长连跟</span><strong id="streakBest">0.0</strong>s</span>
+        <span class="on-target"><span class="dot" id="targetDot"></span><span class="label">准星</span></span>
+      </div>
+      <div class="settings" id="settings">
+        <div class="ctrl">
+          <span>时长</span>
+          <input type="range" id="duration" min="10" max="60" value="30" step="1">
+          <span class="val" id="durationVal">30</span><span>s</span>
+        </div>
+        <div class="ctrl">
+          <span>灵敏度</span>
+          <input type="range" id="sensitivity" min="2" max="24" value="10" step="1">
+          <span class="val" id="sensitivityVal">1.0</span>
+        </div>
+        <span>速度</span>
+        <label class="opt"><input type="radio" name="speed" value="1">慢</label>
+        <label class="opt"><input type="radio" name="speed" value="2" checked>中</label>
+        <label class="opt"><input type="radio" name="speed" value="3">快</label>
+        <span>范围</span>
+        <label class="opt"><input type="radio" name="range" value="1">小</label>
+        <label class="opt"><input type="radio" name="range" value="2" checked>中</label>
+        <label class="opt"><input type="radio" name="range" value="3">大</label>
+        <span id="scaleVarGroup">
+          <span>缩放</span>
+          <label class="opt"><input type="radio" name="scaleVar" value="1">弱</label>
+          <label class="opt"><input type="radio" name="scaleVar" value="2" checked>中</label>
+          <label class="opt"><input type="radio" name="scaleVar" value="3">强</label>
+        </span>
+        <label class="opt"><input type="checkbox" id="fixedSize" checked>固定大小</label>
+      </div>
+    </header>
+
+    <div class="arena-wrap idle" id="arenaWrap">
+      <canvas id="canvas"></canvas>
+      <div class="crosshair" id="crosshair"><span class="ring"></span></div>
+      <div id="overlay" class="overlay">
+        <h2 id="overlayTitle">3D 跟随训练</h2>
+        <p class="desc" id="overlayDesc">
+          Aim Lab 风格训练空间，准星居中。球可左右上下及轻微前后移动，视角左右 ±50°、上下 ±24°。
+        </p>
+        <div class="stats-panel" id="statsPanel" hidden>
+          <div class="stat-item">
+            <div class="stat-value accent" id="statTrack">—</div>
+            <div class="stat-name">跟随率</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value warn" id="statStreak">—</div>
+            <div class="stat-name">最长连跟 (s)</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="statOnTime">—</div>
+            <div class="stat-name">跟随总时长 (s)</div>
+          </div>
+        </div>
+        <button type="button" class="btn" id="startBtn">开始训练</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+
+    const canvas = document.getElementById('canvas');
+    const arenaWrap = document.getElementById('arenaWrap');
+    const crosshair = document.getElementById('crosshair');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlayDesc = document.getElementById('overlayDesc');
+    const statsPanel = document.getElementById('statsPanel');
+    const statTrack = document.getElementById('statTrack');
+    const statStreak = document.getElementById('statStreak');
+    const statOnTime = document.getElementById('statOnTime');
+    const startBtn = document.getElementById('startBtn');
+    const settings = document.getElementById('settings');
+    const durationInput = document.getElementById('duration');
+    const durationVal = document.getElementById('durationVal');
+    const timeLeftEl = document.getElementById('timeLeft');
+    const trackRateEl = document.getElementById('trackRate');
+    const streakBestEl = document.getElementById('streakBest');
+    const targetDot = document.getElementById('targetDot');
+    const fixedSizeCheck = document.getElementById('fixedSize');
+    const scaleVarGroup = document.getElementById('scaleVarGroup');
+    const sensitivityInput = document.getElementById('sensitivity');
+    const sensitivityVal = document.getElementById('sensitivityVal');
+
+    const SPEED_MAP = { 1: 2.2, 2: 4.0, 3: 6.5 };
+    const RANGE_MAP = { 1: 12, 2: 18, 3: 24 };
+    const ARENA_SCALE = 1.5;
+    const SCALE_VAR_MAP = { 1: [0.55, 1.0], 2: [0.4, 1.35], 3: [0.25, 1.6] };
+    const BASE_RADIUS = 0.85;
+    const CAMERA_DIST = 35;
+    const BALL_PLANE_Z = 0;
+    const BALL_Z_HALF = 2.5;
+    const BG_BACKDROP_Z = -20;
+    const BG_XY_GRID_Z = -18;
+    const BG_DEPTH_GRID_Z = -28;
+    const PITCH_LIMIT = Math.PI / 7.5;
+    const YAW_LIMIT = (50 * Math.PI) / 180;
+    const BASE_LOOK_SENS = 0.0022;
+    const CENTER_NDC = new THREE.Vector2(0, 0);
+
+    let renderer, scene, camera, ball, ballMat, wireBox, boxMat, envGroup, cyberBackdrop, xyGrid, gridAccent, depthGrid, raycaster;
+    let yaw = 0;
+    let pitch = 0;
+    const lookTarget = new THREE.Vector3();
+    let velocity = new THREE.Vector3();
+    let halfW = 18;
+    let halfH = 9;
+    let playing = false;
+    let endAt = 0;
+    let sessionDurationSec = 30;
+    let elapsedPlay = 0;
+    let onTargetTime = 0;
+    let currentStreak = 0;
+    let bestStreak = 0;
+    let isOnTarget = false;
+    let targetScale = 1;
+    let currentScale = 1;
+    let nextScaleAt = 0;
+    let nextSteerAt = 0;
+    let clock = new THREE.Clock();
+    let animId = null;
+    let lastPointerX = null;
+    let lastPointerY = null;
+    let boundaryFlash = 0;
+
+    function getRadio(name) {
+      const el = settings.querySelector(`input[name="${name}"]:checked`);
+      return el ? Number(el.value) : 2;
+    }
+
+    function getDurationSec() {
+      return Number(durationInput.value);
+    }
+
+    function getSpeed() {
+      return SPEED_MAP[getRadio('speed')] || 4;
+    }
+
+    function getArenaHalf() {
+      const base = RANGE_MAP[getRadio('range')] || 18;
+      const scaled = base * ARENA_SCALE;
+      return { halfW: scaled, halfH: scaled / 2 };
+    }
+
+    function getScaleRange() {
+      return SCALE_VAR_MAP[getRadio('scaleVar')] || SCALE_VAR_MAP[2];
+    }
+
+    function getLookSensitivity() {
+      return (Number(sensitivityInput.value) / 10) * BASE_LOOK_SENS;
+    }
+
+    function getBallMargin() {
+      return BASE_RADIUS * currentScale + 0.15;
+    }
+
+    function isFixedSize() {
+      return fixedSizeCheck.checked;
+    }
+
+    function syncArenaSize() {
+      const a = getArenaHalf();
+      halfW = a.halfW;
+      halfH = a.halfH;
+    }
+
+    function updateFog() {
+      if (!scene.fog) return;
+      const extent = Math.max(halfW, halfH);
+      scene.fog.near = extent * 1.5;
+      scene.fog.far = extent * 5.5;
+    }
+
+    function updateBoundaryVisual() {
+      wireBox.scale.set(halfW, halfH, 1);
+      wireBox.position.z = BALL_PLANE_Z;
+
+      const pad = 1.18;
+      const bw = halfW * 2 * pad;
+      const bh = halfH * 2 * pad;
+
+      if (cyberBackdrop) {
+        cyberBackdrop.scale.set(bw, bh, 1);
+        cyberBackdrop.position.z = BG_BACKDROP_Z;
+      }
+
+      if (xyGrid) {
+        rebuildXYGrid(bw, bh);
+        xyGrid.position.z = BG_XY_GRID_Z;
+      }
+
+      if (gridAccent) {
+        gridAccent.position.z = BG_XY_GRID_Z + 0.05;
+      }
+
+      if (depthGrid) {
+        depthGrid.scale.set(halfW * 3, 1, halfW * 1.5);
+        depthGrid.position.z = BG_DEPTH_GRID_Z;
+      }
+
+      updateFog();
+    }
+
+    function makeAimLabSceneBackground() {
+      const cvs = document.createElement('canvas');
+      cvs.width = 512;
+      cvs.height = 512;
+      const ctx = cvs.getContext('2d');
+      const grad = ctx.createRadialGradient(256, 260, 30, 256, 256, 400);
+      grad.addColorStop(0, '#2a2a2a');
+      grad.addColorStop(0.55, '#1e1e1e');
+      grad.addColorStop(1, '#141414');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 512, 512);
+      const tex = new THREE.CanvasTexture(cvs);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function drawAimLabGridFill(ctx, w, h) {
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, '#252525');
+      bg.addColorStop(0.5, '#1e1e1e');
+      bg.addColorStop(1, '#1a1a1a');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+
+      const cellX = w / 24;
+      const cellY = h / 12;
+      for (let x = 0; x <= w; x += cellX) {
+        const major = Math.round(x / cellX) % 4 === 0;
+        ctx.strokeStyle = major ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = major ? 1.2 : 0.6;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= h; y += cellY) {
+        const major = Math.round(y / cellY) % 3 === 0;
+        ctx.strokeStyle = major ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = major ? 1.2 : 0.6;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      const vignette = ctx.createRadialGradient(w / 2, h / 2, w * 0.2, w / 2, h / 2, w * 0.72);
+      vignette.addColorStop(0, 'rgba(0,0,0,0)');
+      vignette.addColorStop(1, 'rgba(0,0,0,0.35)');
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    let arenaFillTex;
+
+    function createXYGridGeometry(width, height, divX, divY) {
+      const points = [];
+      const hw = width / 2;
+      const hh = height / 2;
+      for (let i = 0; i <= divX; i++) {
+        const x = -hw + (width / divX) * i;
+        points.push(x, -hh, 0, x, hh, 0);
+      }
+      for (let j = 0; j <= divY; j++) {
+        const y = -hh + (height / divY) * j;
+        points.push(-hw, y, 0, hw, y, 0);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+      return geo;
+    }
+
+    function rebuildXYGrid(width, height) {
+      if (xyGrid) {
+        xyGrid.geometry.dispose();
+        xyGrid.geometry = createXYGridGeometry(width, height, 24, 12);
+      }
+      if (gridAccent) {
+        gridAccent.geometry.dispose();
+        gridAccent.geometry = createXYGridGeometry(width, height, 6, 3);
+      }
+    }
+
+    function buildEnvironment() {
+      envGroup = new THREE.Group();
+      scene.background = makeAimLabSceneBackground();
+
+      const fillCvs = document.createElement('canvas');
+      fillCvs.width = 512;
+      fillCvs.height = 256;
+      drawAimLabGridFill(fillCvs.getContext('2d'), 512, 256);
+      arenaFillTex = new THREE.CanvasTexture(fillCvs);
+      arenaFillTex.colorSpace = THREE.SRGBColorSpace;
+
+      cyberBackdrop = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({
+          map: arenaFillTex,
+          transparent: true,
+          opacity: 0.95,
+          depthWrite: false,
+        })
+      );
+      cyberBackdrop.position.z = BG_BACKDROP_Z;
+      cyberBackdrop.renderOrder = 0;
+      envGroup.add(cyberBackdrop);
+
+      const gridLineMat = { depthWrite: false, transparent: true };
+      xyGrid = new THREE.LineSegments(
+        createXYGridGeometry(2, 1, 24, 12),
+        new THREE.LineBasicMaterial({ color: 0x5a5a5a, opacity: 0.55, ...gridLineMat })
+      );
+      xyGrid.position.z = BG_XY_GRID_Z;
+      xyGrid.renderOrder = 0;
+      envGroup.add(xyGrid);
+
+      gridAccent = new THREE.LineSegments(
+        createXYGridGeometry(2, 1, 6, 3),
+        new THREE.LineBasicMaterial({ color: 0x8a8a8a, opacity: 0.45, ...gridLineMat })
+      );
+      gridAccent.position.z = BG_XY_GRID_Z + 0.05;
+      gridAccent.renderOrder = 0;
+      envGroup.add(gridAccent);
+
+      depthGrid = new THREE.GridHelper(1, 28, 0x4a4a4a, 0x2a2a2a);
+      depthGrid.rotation.x = Math.PI / 2;
+      depthGrid.position.z = BG_DEPTH_GRID_Z;
+      depthGrid.material.opacity = 0.18;
+      depthGrid.material.transparent = true;
+      depthGrid.material.depthWrite = false;
+      depthGrid.renderOrder = 0;
+      envGroup.add(depthGrid);
+
+      envGroup.renderOrder = 0;
+      scene.add(envGroup);
+    }
+
+    function initThree() {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setClearColor(0x1a1a1a);
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+
+      scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0x1a1a1a, 35, 110);
+
+      camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+      updateCamera();
+
+      buildEnvironment();
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.42));
+      const hemi = new THREE.HemisphereLight(0xcccccc, 0x1a1a1a, 0.48);
+      scene.add(hemi);
+      const key = new THREE.DirectionalLight(0xffffff, 0.65);
+      key.position.set(-10, 12, 18);
+      scene.add(key);
+      const fill = new THREE.DirectionalLight(0x888888, 0.25);
+      fill.position.set(12, -4, 8);
+      scene.add(fill);
+
+      ballMat = new THREE.MeshStandardMaterial({
+        color: 0xe85d3a,
+        emissive: 0x4a1808,
+        emissiveIntensity: 0.4,
+        metalness: 0.2,
+        roughness: 0.45,
+      });
+      ball = new THREE.Mesh(new THREE.SphereGeometry(BASE_RADIUS, 40, 40), ballMat);
+      ball.renderOrder = 10;
+      scene.add(ball);
+
+      const frameGeo = new THREE.BoxGeometry(1, 1, 0.02);
+      boxMat = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.65 });
+      wireBox = new THREE.LineSegments(new THREE.EdgesGeometry(frameGeo), boxMat);
+      scene.add(wireBox);
+
+      syncArenaSize();
+      updateBoundaryVisual();
+
+      raycaster = new THREE.Raycaster();
+      resize();
+    }
+
+    function resize() {
+      const w = arenaWrap.clientWidth;
+      const h = arenaWrap.clientHeight;
+      if (w === 0 || h === 0) return;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+
+    function randomVelocity() {
+      const speed = getSpeed() * (0.75 + Math.random() * 0.5);
+      const v = new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 0.65
+      );
+      if (v.lengthSq() < 0.01) v.set(1, 0.25, 0.12);
+      v.normalize().multiplyScalar(speed);
+      return v;
+    }
+
+    function pickNewScale() {
+      const [lo, hi] = getScaleRange();
+      return lo + Math.random() * (hi - lo);
+    }
+
+    function randomPosInBounds() {
+      const m = getBallMargin();
+      const limX = halfW - m;
+      const limY = halfH - m;
+      const limZ = BALL_Z_HALF - getBallMargin() * 0.15;
+      return new THREE.Vector3(
+        (Math.random() * 2 - 1) * limX,
+        (Math.random() * 2 - 1) * limY,
+        (Math.random() * 2 - 1) * limZ
+      );
+    }
+
+    function resetBall() {
+      syncArenaSize();
+      ball.position.copy(randomPosInBounds());
+      velocity.copy(randomVelocity());
+      if (isFixedSize()) {
+        targetScale = 1;
+        currentScale = 1;
+      } else {
+        targetScale = pickNewScale();
+        currentScale = targetScale;
+      }
+      ball.scale.setScalar(currentScale);
+      nextScaleAt = performance.now() + 600 + Math.random() * 1200;
+      nextSteerAt = performance.now() + 800 + Math.random() * 1500;
+      updateBoundaryVisual();
+    }
+
+    function steerBall(now) {
+      if (now >= nextSteerAt) {
+        const blend = randomVelocity();
+        const t = 0.35 + Math.random() * 0.35;
+        velocity.x = THREE.MathUtils.lerp(velocity.x, blend.x, t);
+        velocity.y = THREE.MathUtils.lerp(velocity.y, blend.y, t);
+        velocity.z = THREE.MathUtils.lerp(velocity.z, blend.z, t);
+        const len = Math.hypot(velocity.x, velocity.y, velocity.z) || 1;
+        const target = getSpeed() * (0.8 + Math.random() * 0.4);
+        velocity.x = (velocity.x / len) * target;
+        velocity.y = (velocity.y / len) * target;
+        velocity.z = (velocity.z / len) * target;
+        nextSteerAt = now + 700 + Math.random() * 1800;
+      }
+    }
+
+    function updateScale(now, dt) {
+      if (isFixedSize()) {
+        targetScale = 1;
+        currentScale = 1;
+      } else {
+        if (now >= nextScaleAt) {
+          targetScale = pickNewScale();
+          nextScaleAt = now + 500 + Math.random() * 1500;
+        }
+        currentScale += (targetScale - currentScale) * Math.min(1, dt * 3.5);
+      }
+      ball.scale.setScalar(currentScale);
+    }
+
+    function clampBall(dt) {
+      const limX = halfW - getBallMargin();
+      const limY = halfH - getBallMargin();
+      const pos = ball.position;
+      let hitBoundary = false;
+
+      if (pos.x < -limX || pos.x > limX) {
+        pos.x = THREE.MathUtils.clamp(pos.x, -limX, limX);
+        velocity.x *= -1;
+        hitBoundary = true;
+      }
+      if (pos.y < -limY || pos.y > limY) {
+        pos.y = THREE.MathUtils.clamp(pos.y, -limY, limY);
+        velocity.y *= -1;
+        hitBoundary = true;
+      }
+
+      const limZ = BALL_Z_HALF - getBallMargin() * 0.15;
+      if (pos.z < -limZ || pos.z > limZ) {
+        pos.z = THREE.MathUtils.clamp(pos.z, -limZ, limZ);
+        velocity.z *= -1;
+        hitBoundary = true;
+      }
+
+      if (hitBoundary) {
+        boundaryFlash = 1;
+      }
+
+      pos.x += velocity.x * dt;
+      pos.y += velocity.y * dt;
+      pos.z += velocity.z * dt;
+    }
+
+    function updateBoundaryFlash(dt) {
+      if (boundaryFlash <= 0) {
+        boxMat.color.setHex(0x888888);
+        boxMat.opacity = 0.65;
+        return;
+      }
+      boundaryFlash = Math.max(0, boundaryFlash - dt * 3.5);
+      const t = boundaryFlash;
+      boxMat.color.setHex(0xe85d3a);
+      boxMat.opacity = 0.65 + t * 0.35;
+    }
+
+    function updateCamera() {
+      camera.position.set(0, 0, CAMERA_DIST);
+      const dir = new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        -Math.cos(yaw) * Math.cos(pitch)
+      );
+      lookTarget.copy(camera.position).add(dir);
+      camera.lookAt(lookTarget);
+    }
+
+    function checkTracking() {
+      raycaster.setFromCamera(CENTER_NDC, camera);
+      const hits = raycaster.intersectObject(ball);
+      return hits.length > 0;
+    }
+
+    function requestArenaLock() {
+      if (canvas.requestPointerLock) {
+        canvas.requestPointerLock();
+      }
+    }
+
+    function exitArenaLock() {
+      if (document.pointerLockElement === canvas && document.exitPointerLock) {
+        document.exitPointerLock();
+      }
+    }
+
+    function updateBallColor(onTarget) {
+      if (onTarget) {
+        ballMat.color.setHex(0x3dffa8);
+        ballMat.emissive.setHex(0x0a4422);
+        ballMat.emissiveIntensity = 0.65;
+      } else {
+        ballMat.color.setHex(0xe85d3a);
+        ballMat.emissive.setHex(0x4a1808);
+        ballMat.emissiveIntensity = 0.4;
+      }
+    }
+
+    function updateHudLive() {
+      const left = Math.max(0, endAt - performance.now());
+      timeLeftEl.textContent = (left / 1000).toFixed(1);
+      const rate = elapsedPlay > 0 ? (onTargetTime / elapsedPlay) * 100 : 0;
+      trackRateEl.textContent = rate.toFixed(1);
+      streakBestEl.textContent = bestStreak.toFixed(1);
+      targetDot.classList.toggle('active', isOnTarget);
+      crosshair.classList.toggle('on-target', isOnTarget);
+    }
+
+    function tick() {
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const now = performance.now();
+
+      if (playing) {
+        steerBall(now);
+        updateScale(now, dt);
+        clampBall(dt);
+        updateBoundaryFlash(dt);
+
+        isOnTarget = checkTracking();
+        updateBallColor(isOnTarget);
+
+        elapsedPlay += dt;
+        if (isOnTarget) {
+          onTargetTime += dt;
+          currentStreak += dt;
+          if (currentStreak > bestStreak) bestStreak = currentStreak;
+        } else {
+          currentStreak = 0;
+        }
+
+        if (now >= endAt) {
+          endGame();
+        } else {
+          updateHudLive();
+        }
+      }
+
+      renderer.render(scene, camera);
+      animId = requestAnimationFrame(tick);
+    }
+
+    function onPointerMove(e) {
+      if (!playing) return;
+
+      let deltaX = 0;
+      let deltaY = 0;
+
+      if (document.pointerLockElement === canvas) {
+        deltaX = e.movementX || 0;
+        deltaY = e.movementY || 0;
+      } else if (lastPointerX !== null) {
+        deltaX = e.clientX - lastPointerX;
+        deltaY = e.clientY - lastPointerY;
+      }
+
+      lastPointerX = e.clientX;
+      lastPointerY = e.clientY;
+
+      if (deltaX === 0 && deltaY === 0) return;
+
+      const sens = getLookSensitivity();
+      yaw += deltaX * sens;
+      pitch -= deltaY * sens;
+      yaw = THREE.MathUtils.clamp(yaw, -YAW_LIMIT, YAW_LIMIT);
+      pitch = THREE.MathUtils.clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
+      updateCamera();
+    }
+
+    function startGame() {
+      playing = true;
+      sessionDurationSec = getDurationSec();
+      endAt = performance.now() + sessionDurationSec * 1000;
+      elapsedPlay = 0;
+      onTargetTime = 0;
+      currentStreak = 0;
+      bestStreak = 0;
+      isOnTarget = false;
+      yaw = 0;
+      pitch = 0;
+      lastPointerX = null;
+      lastPointerY = null;
+      updateCamera();
+
+      resetBall();
+      updateHudLive();
+
+      overlay.classList.add('hidden');
+      settings.classList.add('disabled');
+      arenaWrap.classList.remove('idle');
+      crosshair.classList.add('visible');
+      clock.getDelta();
+      requestArenaLock();
+    }
+
+    function endGame() {
+      playing = false;
+      exitArenaLock();
+      settings.classList.remove('disabled');
+      arenaWrap.classList.add('idle');
+      crosshair.classList.remove('visible', 'on-target');
+      targetDot.classList.remove('active');
+      updateBallColor(false);
+
+      const trackPct = elapsedPlay > 0 ? (onTargetTime / elapsedPlay) * 100 : 0;
+
+      overlayTitle.textContent = '训练结束';
+      overlayDesc.textContent = `${sessionDurationSec} 秒内，屏幕中心准星对准球体的时间占比即为跟随率。`;
+      statsPanel.hidden = false;
+      statTrack.textContent = trackPct.toFixed(1) + '%';
+      statStreak.textContent = bestStreak.toFixed(1);
+      statOnTime.textContent = onTargetTime.toFixed(1);
+      startBtn.textContent = '再来一局';
+      overlay.classList.remove('hidden');
+    }
+
+    function showStartScreen() {
+      overlayTitle.textContent = `${getDurationSec()} 秒 · 3D 跟随训练`;
+      overlayDesc.textContent =
+        'Aim Lab 风格训练空间，准星居中。球可左右上下及轻微前后移动，视角左右 ±50°、上下 ±24°。';
+      statsPanel.hidden = true;
+      startBtn.textContent = '开始训练';
+      timeLeftEl.textContent = getDurationSec().toFixed(1);
+      trackRateEl.textContent = '0.0';
+      streakBestEl.textContent = '0.0';
+      overlay.classList.remove('hidden');
+    }
+
+    durationInput.addEventListener('input', () => {
+      durationVal.textContent = durationInput.value;
+      if (!playing) timeLeftEl.textContent = Number(durationInput.value).toFixed(1);
+      if (!overlay.classList.contains('hidden') && statsPanel.hidden) {
+        overlayTitle.textContent = `${getDurationSec()} 秒 · 3D 跟随训练`;
+      }
+    });
+
+    sensitivityInput.addEventListener('input', () => {
+      sensitivityVal.textContent = (Number(sensitivityInput.value) / 10).toFixed(1);
+    });
+
+    function syncScaleVarUi() {
+      const fixed = isFixedSize();
+      scaleVarGroup.style.opacity = fixed ? '0.35' : '1';
+      scaleVarGroup.style.pointerEvents = fixed ? 'none' : 'auto';
+    }
+
+    fixedSizeCheck.addEventListener('change', syncScaleVarUi);
+    syncScaleVarUi();
+
+    startBtn.addEventListener('click', startGame);
+    document.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('click', () => {
+      if (playing && document.pointerLockElement !== canvas) {
+        requestArenaLock();
+      }
+    });
+    window.addEventListener('resize', resize);
+
+    initThree();
+    showStartScreen();
+    tick();
+  </script>
+</body>
+</html>
