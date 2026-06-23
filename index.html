@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>反应力测试</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0f0f12;
+      color: #e8e8ed;
+      padding: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin-bottom: 1rem;
+      opacity: 0.85;
+    }
+
+    .stats {
+      display: flex;
+      gap: 2rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.875rem;
+      opacity: 0.7;
+    }
+
+    .stats span strong {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .arena {
+      width: min(520px, 92vw);
+      height: min(360px, 55vh);
+      border-radius: 16px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+      transition: transform 0.1s ease;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+      touch-action: manipulation;
+    }
+
+    .arena:active:not(.disabled) {
+      transform: scale(0.985);
+    }
+
+    .arena.idle {
+      background: #2a2a32;
+      border: 2px dashed #4a4a58;
+    }
+
+    .arena.waiting {
+      background: #c41e3a;
+    }
+
+    .arena.ready {
+      background: #22a55b;
+    }
+
+    .arena.too-early {
+      background: #8b4513;
+    }
+
+    .arena.result {
+      background: #1e3a5f;
+    }
+
+    .arena.disabled {
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .arena .main-text {
+      font-size: clamp(1.5rem, 5vw, 2rem);
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .arena .sub-text {
+      margin-top: 0.75rem;
+      font-size: 0.95rem;
+      opacity: 0.85;
+      max-width: 28ch;
+    }
+
+    .arena .time {
+      font-size: clamp(2.5rem, 10vw, 4rem);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
+
+    .hint {
+      margin-top: 1.25rem;
+      font-size: 0.8rem;
+      opacity: 0.45;
+      max-width: 360px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .history {
+      margin-top: 1.5rem;
+      width: min(520px, 92vw);
+      font-size: 0.8rem;
+      opacity: 0.55;
+    }
+
+    .history:empty {
+      display: none;
+    }
+
+    .history li {
+      list-style: none;
+      padding: 0.25rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+  </style>
+</head>
+<body>
+
+  <h1>反应力测试</h1>
+
+  <div class="stats">
+    <span>最佳：<strong id="best">—</strong> ms</span>
+    <span>平均：<strong id="avg">—</strong> ms</span>
+    <span>次数：<strong id="count">0</strong></span>
+  </div>
+
+  <div id="arena" class="arena idle" role="button" tabindex="0" aria-label="反应力测试区域">
+    <p class="time" id="timeDisplay" hidden></p>
+    <p class="main-text" id="mainText">点击开始</p>
+    <p class="sub-text" id="subText">看到绿色后尽快点击</p>
+  </div>
+
+  <p class="hint">红色时请勿点击；变绿后立刻点击。过早点击会判无效。</p>
+
+  <ul class="history" id="history"></ul>
+
+  <script>
+    const State = {
+      IDLE: 'idle',
+      WAITING: 'waiting',
+      READY: 'ready',
+      TOO_EARLY: 'tooEarly',
+      RESULT: 'result',
+    };
+
+    const arena = document.getElementById('arena');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const mainText = document.getElementById('mainText');
+    const subText = document.getElementById('subText');
+    const bestEl = document.getElementById('best');
+    const avgEl = document.getElementById('avg');
+    const countEl = document.getElementById('count');
+    const historyEl = document.getElementById('history');
+
+    let state = State.IDLE;
+    let greenAt = 0;
+    let delayTimer = null;
+    let resultTimer = null;
+    let skipNextClick = false;
+    const times = [];
+
+    const MIN_DELAY = 1500;
+    const MAX_DELAY = 5000;
+    const RESULT_SHOW_MS = 1800;
+
+    function randomDelay() {
+      return MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
+    }
+
+    function setState(next) {
+      state = next;
+      arena.className = 'arena ' + next;
+    }
+
+    function clearTimers() {
+      if (delayTimer) {
+        clearTimeout(delayTimer);
+        delayTimer = null;
+      }
+      if (resultTimer) {
+        clearTimeout(resultTimer);
+        resultTimer = null;
+      }
+    }
+
+    function updateStats() {
+      countEl.textContent = String(times.length);
+      if (times.length === 0) {
+        bestEl.textContent = '—';
+        avgEl.textContent = '—';
+        return;
+      }
+      const best = Math.min(...times);
+      const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+      bestEl.textContent = String(best);
+      avgEl.textContent = String(avg);
+    }
+
+    function addHistory(ms) {
+      const li = document.createElement('li');
+      li.textContent = `第 ${times.length} 次：${ms} ms`;
+      historyEl.prepend(li);
+      while (historyEl.children.length > 8) {
+        historyEl.removeChild(historyEl.lastChild);
+      }
+    }
+
+    function showIdle() {
+      clearTimers();
+      greenAt = 0;
+      setState(State.IDLE);
+      timeDisplay.hidden = true;
+      mainText.hidden = false;
+      subText.hidden = false;
+      mainText.textContent = '点击开始';
+      subText.textContent = '看到绿色后尽快点击';
+      arena.classList.remove('disabled');
+    }
+
+    function startWaiting() {
+      clearTimers();
+      greenAt = 0;
+      setState(State.WAITING);
+      timeDisplay.hidden = true;
+      mainText.hidden = false;
+      mainText.textContent = '等待…';
+      subText.textContent = '变绿后再点';
+      delayTimer = setTimeout(() => {
+        delayTimer = null;
+        setState(State.READY);
+        mainText.textContent = '点击！';
+        subText.textContent = '';
+        // 等浏览器真正把绿色画到屏幕上再开始计时
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (state === State.READY) {
+              greenAt = performance.now();
+            }
+          });
+        });
+      }, randomDelay());
+    }
+
+    function showTooEarly() {
+      clearTimers();
+      setState(State.TOO_EARLY);
+      timeDisplay.hidden = true;
+      mainText.hidden = false;
+      mainText.textContent = '太快了！';
+      subText.textContent = '红色时不能点，请重试';
+      resultTimer = setTimeout(showIdle, RESULT_SHOW_MS);
+    }
+
+    function showResult(ms) {
+      clearTimers();
+      setState(State.RESULT);
+      times.push(ms);
+      updateStats();
+      addHistory(ms);
+
+      mainText.hidden = true;
+      timeDisplay.hidden = false;
+      timeDisplay.textContent = String(ms);
+      subText.textContent = '毫秒 · 再次点击开始下一轮';
+
+      skipNextClick = true;
+    }
+
+    function recordReaction() {
+      const ms = Math.max(0, Math.round(performance.now() - greenAt));
+      showResult(ms);
+    }
+
+    function handlePointerDown(e) {
+      if (state === State.WAITING) {
+        e.preventDefault();
+        showTooEarly();
+        return;
+      }
+      if (state === State.READY) {
+        e.preventDefault();
+        if (greenAt > 0) {
+          recordReaction();
+        }
+      }
+    }
+
+    function handleClick() {
+      if (skipNextClick) {
+        skipNextClick = false;
+        return;
+      }
+
+      if (state === State.WAITING || state === State.READY) {
+        return;
+      }
+
+      if (state === State.IDLE || state === State.RESULT) {
+        startWaiting();
+        return;
+      }
+
+      if (state === State.TOO_EARLY) {
+        clearTimers();
+        showIdle();
+      }
+    }
+
+    arena.addEventListener('pointerdown', handlePointerDown);
+    arena.addEventListener('click', handleClick);
+    arena.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        handleClick();
+      }
+    });
+  </script>
+</body>
+</html>
